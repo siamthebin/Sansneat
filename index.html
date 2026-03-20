@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sansneat</title>
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#050505" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Sansneat" />
+    <link rel="apple-touch-icon" href="https://i.postimg.cc/Bv74qTM5/IMG-0140.jpg" />
+    <link rel="icon" type="image/jpeg" href="https://i.postimg.cc/Bv74qTM5/IMG-0140.jpg" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+      body {
+        background-color: #050505;
+        color: #fff;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+      }
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: #09090b; }
+      ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+      
+      .glass-panel {
+        background: rgba(24, 24, 27, 0.8);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      .hero-gradient {
+        background: linear-gradient(to right, #4f46e5, #9333ea, #ec4899);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      /* Hide scrollbar for horizontal lists */
+      .scrollbar-hide::-webkit-scrollbar { display: none; }
+      .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+      .mask-gradient-r { mask-image: linear-gradient(to right, black 85%, transparent 100%); }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

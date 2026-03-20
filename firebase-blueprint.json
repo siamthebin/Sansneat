@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Restaurant": {
+      "title": "Restaurant",
+      "description": "Restaurant information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "image": { "type": "string" },
+        "rating": { "type": "number" },
+        "category": { "type": "string" }
+      },
+      "required": ["name", "image"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "Food item in a restaurant's menu",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "restaurantId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "image": { "type": "string" },
+        "category": { "type": "string" }
+      },
+      "required": ["restaurantId", "name", "price"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "restaurantId": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "totalAmount": { "type": "number" },
+        "commissionAmount": { "type": "number" },
+        "restaurantEarnings": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "preparing", "out-for-delivery", "delivered"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "restaurantId", "items", "totalAmount", "status", "commissionAmount", "restaurantEarnings"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/restaurants/{restaurantId}": {
+      "schema": "Restaurant",
+      "description": "List of restaurants"
+    },
+    "/restaurants/{restaurantId}/menu/{itemId}": {
+      "schema": "MenuItem",
+      "description": "Menu items for a specific restaurant"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer orders"
+    }
+  }
+}

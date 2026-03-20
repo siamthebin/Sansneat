@@ -1,0 +1,21 @@
+{
+  "name": "Sansneat",
+  "short_name": "Sansneat",
+  "description": "A premium food delivery experience with real-time order tracking and secure authentication.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "icons": [
+    {
+      "src": "https://i.postimg.cc/Bv74qTM5/IMG-0140.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "https://i.postimg.cc/Bv74qTM5/IMG-0140.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string
+    //   - photoURL: string
+    //   - role: string (customer/admin)
+    //
+    // Collection: restaurants
+    // Document ID: {restaurantId}
+    // Fields:
+    //   - name: string (required)
+    //   - image: string (required)
+    //   - description: string
+    //   - rating: number
+    //
+    // Collection: restaurants/{restaurantId}/menu
+    // Document ID: {itemId}
+    // Fields:
+    //   - name: string (required)
+    //   - price: number (required)
+    //   - image: string
+    //
+    // Collection: orders
+    // Document ID: {orderId}
+    // Fields:
+    //   - userId: string (required)
+    //   - restaurantId: string (required)
+    //   - items: list (required)
+    //   - totalAmount: number (required)
+    //   - status: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "sloudsan@gmail.com" && request.auth.token.email_verified == true) ||
+          (request.auth.token.email == "sansneat@sanscounts.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string &&
+             data.email is string &&
+             (!('role' in data) || data.role in ['customer', 'admin', 'restaurant']);
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['userId', 'restaurantId', 'items', 'totalAmount', 'status', 'commissionAmount', 'restaurantEarnings']) &&
+             data.userId is string &&
+             data.restaurantId is string &&
+             data.items is list &&
+             data.totalAmount is number &&
+             data.commissionAmount is number &&
+             data.restaurantEarnings is number &&
+             data.status in ['pending', 'preparing', 'out-for-delivery', 'delivered'];
+    }
+
+    function isRestaurantOwner(restaurantId) {
+      let restaurant = get(/databases/$(database)/documents/restaurants/$(restaurantId)).data;
+      return isAuthenticated() && restaurant.ownerEmail == request.auth.token.email;
+    }
+
+    function isValidRestaurant(data) {
+      return data.keys().hasAll(['name', 'image', 'category']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.image is string &&
+             data.category is string;
+    }
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['name', 'price']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.price is number && data.price >= 0;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'customer' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /restaurants/{restaurantId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isRestaurantOwner(restaurantId) && isValidRestaurant(request.resource.data));
+      allow delete: if isAdmin();
+      
+      match /menu/{itemId} {
+        allow read: if true;
+        allow write: if isAdmin() || (isRestaurantOwner(restaurantId) && isValidMenuItem(request.resource.data));
+      }
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId && isValidOrder(request.resource.data);
+      allow update: if isAuthenticated() && (isAdmin() || (isDocOwner() && request.resource.data.status == resource.data.status && isValidOrder(request.resource.data)));
+    }
+  }
+}
