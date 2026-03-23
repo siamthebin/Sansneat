@@ -2,18 +2,110 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import React, { useState, useEffect, useRef } from 'react';
+import * as React from 'react';
+import { useState, useEffect, useRef, Component } from 'react';
 import { 
   Layout, Box, ShoppingCart, User, Home, Search, Clock, Star, ChevronRight, 
   MapPin, Plus, Minus, Trash2, CheckCircle2, Package, Truck, UtensilsCrossed,
-  ArrowLeft, LogOut, LogIn, Sparkles, Menu as MenuIcon, X, Smartphone, Globe, Check, History, Settings
+  ArrowLeft, LogOut, LogIn, Sparkles, Menu as MenuIcon, X, Smartphone, Globe, Check, History, Settings, AlertCircle
 } from 'lucide-react';
 import { 
-  auth, db, googleProvider, signInWithPopup, signOut, onAuthStateChanged,
+  auth, db, signOut, onAuthStateChanged,
   collection, doc, setDoc, getDoc, getDocs, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc 
 } from './firebase';
-import { UserProfile, Restaurant, MenuItem, CartItem, Order, AppView } from './types';
+import { UserProfile, Restaurant, MenuItem, CartItem, Order, AppView, OperationType, FirestoreErrorInfo } from './types';
 import { LoginWithSanscounts } from './components/LoginWithSanscounts';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
+import { StripePaymentForm } from './components/StripePaymentForm';
+
+// Initialize Stripe
+const stripePromise = loadStripe((import.meta as any).env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_placeholder');
+
+// --- Error Handling ---
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: any;
+}
+
+export class ErrorBoundary extends (Component as any) {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let errorMessage = "Something went wrong.";
+      try {
+        const parsed = JSON.parse(this.state.error.message);
+        if (parsed.error && parsed.operationType) {
+          errorMessage = `Firestore Error: ${parsed.operationType} on ${parsed.path || 'unknown path'} failed. ${parsed.error}`;
+        }
+      } catch (e) {
+        errorMessage = this.state.error.message || errorMessage;
+      }
+
+      return (
+        <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-zinc-900 border border-zinc-800 rounded-3xl p-8 text-center space-y-6">
+            <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto">
+              <AlertCircle className="text-red-500" size={32} />
+            </div>
+            <h2 className="text-2xl font-bold tracking-tight">Application Error</h2>
+            <p className="text-zinc-400 text-sm leading-relaxed">
+              {errorMessage}
+            </p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full py-3 bg-white text-black font-bold rounded-xl hover:bg-zinc-200 transition-colors"
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // --- Intro Animation Component ---
 
@@ -141,13 +233,23 @@ export default function App() {
       console.log("App: Auth state changed", firebaseUser?.email || "No user");
       try {
         if (firebaseUser) {
-          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          if (userDoc.exists()) {
+          const userPath = `users/${firebaseUser.uid}`;
+          let userDoc;
+          try {
+            userDoc = await getDoc(doc(db, userPath));
+          } catch (error) {
+            handleFirestoreError(error, OperationType.GET, userPath);
+          }
+          if (userDoc && userDoc.exists()) {
             const userData = userDoc.data() as UserProfile;
             // Ensure admin email always has admin role
             if (ADMIN_EMAILS.includes(userData.email) && userData.role !== 'admin') {
               const updatedUser = { ...userData, role: 'admin' as const };
-              await setDoc(doc(db, 'users', firebaseUser.uid), updatedUser);
+              try {
+                await setDoc(doc(db, userPath), updatedUser);
+              } catch (error) {
+                handleFirestoreError(error, OperationType.WRITE, userPath);
+              }
               setUser(updatedUser);
             } else {
               setUser(userData);
@@ -160,7 +262,11 @@ export default function App() {
               photoURL: firebaseUser.photoURL,
               role: ADMIN_EMAILS.includes(firebaseUser.email!) ? 'admin' : 'customer'
             };
-            await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+            try {
+              await setDoc(doc(db, userPath), newUser);
+            } catch (error) {
+              handleFirestoreError(error, OperationType.WRITE, userPath);
+            }
             setUser(newUser);
           }
         } else {
@@ -175,7 +281,8 @@ export default function App() {
 
   // Real-time Restaurants Listener
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'restaurants'), (snapshot) => {
+    const path = 'restaurants';
+    const unsubscribe = onSnapshot(collection(db, path), (snapshot) => {
       const restaurantList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Restaurant));
       // Sort by pinnedOrder (pinned first, then by name)
       const sorted = restaurantList.sort((a, b) => {
@@ -188,7 +295,7 @@ export default function App() {
       });
       setRestaurants(sorted);
     }, (error) => {
-      console.error("Restaurants listener error:", error);
+      handleFirestoreError(error, OperationType.LIST, path);
     });
     
     return () => unsubscribe();
@@ -198,21 +305,26 @@ export default function App() {
   useEffect(() => {
     if (selectedRestaurant) {
       const fetchMenu = async () => {
-        const querySnapshot = await getDocs(collection(db, `restaurants/${selectedRestaurant.id}/menu`));
-        const menuList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
-        
-        if (menuList.length === 0) {
-          const seedMenu: MenuItem[] = [
-            { id: 'm1', restaurantId: selectedRestaurant.id, name: 'Classic Burger', description: 'Beef patty, lettuce, tomato, cheese', price: 12.99, image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400', category: 'Main' },
-            { id: 'm2', restaurantId: selectedRestaurant.id, name: 'Truffle Fries', description: 'Crispy fries with truffle oil', price: 6.99, image: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?w=400', category: 'Sides' },
-            { id: 'm3', restaurantId: selectedRestaurant.id, name: 'Milkshake', description: 'Vanilla, Chocolate or Strawberry', price: 5.99, image: 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=400', category: 'Drinks' },
-          ];
-          for (const m of seedMenu) {
-            await setDoc(doc(db, `restaurants/${selectedRestaurant.id}/menu`, m.id), m);
+        const menuPath = `restaurants/${selectedRestaurant.id}/menu`;
+        try {
+          const querySnapshot = await getDocs(collection(db, menuPath));
+          const menuList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
+          
+          if (menuList.length === 0) {
+            const seedMenu: MenuItem[] = [
+              { id: 'm1', restaurantId: selectedRestaurant.id, name: 'Classic Burger', description: 'Beef patty, lettuce, tomato, cheese', price: 12.99, image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=400', category: 'Main' },
+              { id: 'm2', restaurantId: selectedRestaurant.id, name: 'Truffle Fries', description: 'Crispy fries with truffle oil', price: 6.99, image: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?w=400', category: 'Sides' },
+              { id: 'm3', restaurantId: selectedRestaurant.id, name: 'Milkshake', description: 'Vanilla, Chocolate or Strawberry', price: 5.99, image: 'https://images.unsplash.com/photo-1572490122747-3968b75cc699?w=400', category: 'Drinks' },
+            ];
+            for (const m of seedMenu) {
+              await setDoc(doc(db, menuPath, m.id), m);
+            }
+            setMenuItems(seedMenu);
+          } else {
+            setMenuItems(menuList);
           }
-          setMenuItems(seedMenu);
-        } else {
-          setMenuItems(menuList);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.LIST, menuPath);
         }
       };
       fetchMenu();
@@ -222,9 +334,10 @@ export default function App() {
   // Real-time Orders Listener
   useEffect(() => {
     if (user) {
+      const path = 'orders';
       const q = user.role === 'admin' 
-        ? query(collection(db, 'orders'))
-        : query(collection(db, 'orders'), where('userId', '==', user.uid));
+        ? query(collection(db, path))
+        : query(collection(db, path), where('userId', '==', user.uid));
       
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const orderList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
@@ -234,19 +347,11 @@ export default function App() {
           return timeB - timeA;
         }));
       }, (error) => {
-        console.error("Orders listener error:", error);
+        handleFirestoreError(error, OperationType.LIST, path);
       });
       return () => unsubscribe();
     }
   }, [user]);
-
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error("Login failed", error);
-    }
-  };
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -299,8 +404,13 @@ export default function App() {
         paymentStatus: 'paid',
         createdAt: serverTimestamp()
       };
-      await addDoc(collection(db, 'orders'), newOrder);
-      setCart([]);
+        const orderPath = 'orders';
+        try {
+          await addDoc(collection(db, orderPath), newOrder);
+        } catch (error) {
+          handleFirestoreError(error, OperationType.CREATE, orderPath);
+        }
+        setCart([]);
       setShowPaymentModal(false);
       setView('orders');
     } catch (error) {
@@ -312,7 +422,7 @@ export default function App() {
 
   const startPayment = () => {
     if (!user) {
-      handleLogin();
+      setShowLoginModal(true);
       return;
     }
     setPaymentStep('details');
@@ -328,7 +438,12 @@ export default function App() {
         displayName: editName,
         photoURL: editPhoto
       };
-      await setDoc(doc(db, 'users', user.uid), updatedUser);
+      const userPath = `users/${user.uid}`;
+      try {
+        await setDoc(doc(db, userPath), updatedUser);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, userPath);
+      }
       setUser(updatedUser);
       setIsEditingProfile(false);
     } catch (error) {
@@ -352,16 +467,23 @@ export default function App() {
         id,
         rating: 5.0
       };
-      await setDoc(doc(db, 'restaurants', id), restaurantData);
-      
-      // Update user role if they exist
-      const q = query(collection(db, 'users'), where('email', '==', newRestaurant.ownerEmail));
-      const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty) {
-        const userDoc = querySnapshot.docs[0];
-        await updateDoc(doc(db, 'users', userDoc.id), {
-          role: 'restaurant'
-        });
+      const restaurantPath = `restaurants/${id}`;
+      try {
+        await setDoc(doc(db, restaurantPath), restaurantData);
+        
+        // Update user role if they exist
+        const usersPath = 'users';
+        const q = query(collection(db, usersPath), where('email', '==', newRestaurant.ownerEmail));
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          const userDoc = querySnapshot.docs[0];
+          const userDocPath = `users/${userDoc.id}`;
+          await updateDoc(doc(db, userDocPath), {
+            role: 'restaurant'
+          });
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, restaurantPath);
       }
 
       setShowAddRestaurantModal(false);
@@ -380,8 +502,9 @@ export default function App() {
     if (!ADMIN_EMAILS.includes(user.email) && !isOwner) return;
     
     setLoading(true);
+    const restaurantPath = `restaurants/${editingRestaurant.id}`;
     try {
-      await updateDoc(doc(db, 'restaurants', editingRestaurant.id), {
+      await updateDoc(doc(db, restaurantPath), {
         name: editingRestaurant.name,
         description: editingRestaurant.description,
         category: editingRestaurant.category,
@@ -390,40 +513,44 @@ export default function App() {
       });
       setEditingRestaurant(null);
     } catch (error) {
-      console.error("Error updating restaurant:", error);
+      handleFirestoreError(error, OperationType.UPDATE, restaurantPath);
     } finally {
       setLoading(false);
     }
   };
 
   const handlePinRestaurant = async (restaurantId: string) => {
+    const path = `restaurants/${restaurantId}`;
     try {
       // Find max pinnedOrder
       const maxPinned = Math.max(0, ...restaurants.map(r => r.pinnedOrder || 0));
-      await updateDoc(doc(db, 'restaurants', restaurantId), {
+      await updateDoc(doc(db, path), {
         pinnedOrder: maxPinned + 1
       });
     } catch (error) {
-      console.error("Pinning failed", error);
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
   const handleUnpinRestaurant = async (restaurantId: string) => {
+    const path = `restaurants/${restaurantId}`;
     try {
-      await updateDoc(doc(db, 'restaurants', restaurantId), {
+      await updateDoc(doc(db, path), {
         pinnedOrder: 0
       });
     } catch (error) {
-      console.error("Unpinning failed", error);
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
   const handleAddMenuItem = async () => {
     if (!menuRestaurantId || !newMenuItem.name) return;
     setLoading(true);
+    const menuPath = `restaurants/${menuRestaurantId}/menu`;
     try {
       const id = Math.random().toString(36).substr(2, 9);
-      await setDoc(doc(db, `restaurants/${menuRestaurantId}/menu`, id), {
+      const itemPath = `${menuPath}/${id}`;
+      await setDoc(doc(db, menuPath, id), {
         ...newMenuItem,
         id,
         restaurantId: menuRestaurantId
@@ -431,7 +558,7 @@ export default function App() {
       setShowAddMenuModal(false);
       setNewMenuItem({ name: '', description: '', price: 0, image: '', category: 'Main' });
     } catch (error) {
-      console.error("Add menu item failed", error);
+      handleFirestoreError(error, OperationType.WRITE, menuPath);
     } finally {
       setLoading(false);
     }
@@ -1353,10 +1480,11 @@ export default function App() {
                               value={order.status}
                               onChange={async (e) => {
                                 const newStatus = e.target.value as Order['status'];
+                                const orderPath = `orders/${order.id}`;
                                 try {
-                                  await updateDoc(doc(db, 'orders', order.id), { status: newStatus });
+                                  await updateDoc(doc(db, orderPath), { status: newStatus });
                                 } catch (error) {
-                                  console.error("Failed to update status:", error);
+                                  handleFirestoreError(error, OperationType.UPDATE, orderPath);
                                 }
                               }}
                               className="bg-zinc-800 text-xs font-bold rounded-lg px-3 py-2 border border-zinc-700 focus:ring-2 focus:ring-red-500 outline-none cursor-pointer hover:bg-zinc-700 transition-colors"
@@ -1443,7 +1571,7 @@ export default function App() {
         <button onClick={() => setView('search')} className={`p-2 ${view === 'search' ? 'text-red-500' : 'text-zinc-500'}`}><Search size={24} /></button>
         <button 
           onClick={() => {
-            if (!user) handleLogin();
+            if (!user) setShowLoginModal(true);
             else setView('orders');
           }} 
           className={`p-2 ${view === 'orders' ? 'text-red-500' : 'text-zinc-500'}`}
@@ -1683,16 +1811,6 @@ export default function App() {
                       setShowLoginModal(false);
                     }} 
                   />
-                <button 
-                  onClick={() => {
-                    setShowLoginModal(false);
-                    handleLogin();
-                  }}
-                  className="w-full flex items-center justify-center gap-3 bg-[#BC002D] hover:bg-[#990024] text-white px-5 py-4 rounded-2xl font-bold transition-all"
-                >
-                  <LogIn size={20} />
-                  <span>Continue with Google</span>
-                </button>
               </div>
             </div>
           </div>
@@ -1717,31 +1835,17 @@ export default function App() {
                     <span className="text-xl font-black text-red-500">${cart.reduce((a, b) => a + b.price * b.quantity, 0).toFixed(2)}</span>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Card Details</label>
-                    <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 space-y-4">
-                      <input type="text" placeholder="Card Number" className="w-full bg-transparent border-none focus:ring-0 text-sm" defaultValue="4242 4242 4242 4242" />
-                      <div className="flex gap-4">
-                        <input type="text" placeholder="MM/YY" className="w-1/2 bg-transparent border-none focus:ring-0 text-sm" defaultValue="12/26" />
-                        <input type="text" placeholder="CVC" className="w-1/2 bg-transparent border-none focus:ring-0 text-sm" defaultValue="123" />
-                      </div>
-                    </div>
-                  </div>
+                  <Elements stripe={stripePromise}>
+                    <StripePaymentForm 
+                      amount={cart.reduce((a, b) => a + b.price * b.quantity, 0)}
+                      onProcessing={() => setPaymentStep('processing')}
+                      onSuccess={() => {
+                        setPaymentStep('success');
+                        setTimeout(placeOrder, 2000);
+                      }}
+                    />
+                  </Elements>
                 </div>
-
-                <button 
-                  onClick={() => {
-                    setPaymentStep('processing');
-                    setTimeout(() => {
-                      setPaymentStep('success');
-                      setTimeout(placeOrder, 2000);
-                    }, 2000);
-                  }}
-                  className="w-full bg-red-500 hover:bg-red-600 text-white py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-2"
-                >
-                  <Smartphone size={20} /> Pay Now
-                </button>
-                <p className="text-[10px] text-zinc-600 text-center uppercase tracking-widest">Encrypted & Secure Transaction</p>
               </div>
             )}
 

@@ -9,10 +9,9 @@
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
-        "role": { "type": "string", "enum": ["customer", "admin"] },
-        "createdAt": { "type": "string", "format": "date-time" }
+        "role": { "type": "string", "enum": ["customer", "admin", "restaurant"] }
       },
-      "required": ["uid", "email"]
+      "required": ["uid", "email", "role"]
     },
     "Restaurant": {
       "title": "Restaurant",
@@ -22,11 +21,13 @@
         "id": { "type": "string" },
         "name": { "type": "string" },
         "description": { "type": "string" },
-        "image": { "type": "string" },
+        "image": { "type": "string", "description": "Base64 or URL" },
         "rating": { "type": "number" },
-        "category": { "type": "string" }
+        "category": { "type": "string" },
+        "ownerEmail": { "type": "string", "format": "email" },
+        "pinnedOrder": { "type": "number" }
       },
-      "required": ["name", "image"]
+      "required": ["id", "name", "image", "ownerEmail", "category"]
     },
     "MenuItem": {
       "title": "MenuItem",
@@ -41,7 +42,7 @@
         "image": { "type": "string" },
         "category": { "type": "string" }
       },
-      "required": ["restaurantId", "name", "price"]
+      "required": ["id", "restaurantId", "name", "price"]
     },
     "Order": {
       "title": "Order",
@@ -50,7 +51,10 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string", "format": "email" },
         "restaurantId": { "type": "string" },
+        "restaurantName": { "type": "string" },
         "items": {
           "type": "array",
           "items": { "type": "object" }
@@ -59,6 +63,7 @@
         "commissionAmount": { "type": "number" },
         "restaurantEarnings": { "type": "number" },
         "status": { "type": "string", "enum": ["pending", "preparing", "out-for-delivery", "delivered"] },
+        "paymentStatus": { "type": "string", "enum": ["paid", "unpaid"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "restaurantId", "items", "totalAmount", "status", "commissionAmount", "restaurantEarnings"]

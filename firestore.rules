@@ -13,31 +13,46 @@ service cloud.firestore {
     //   - email: string (required)
     //   - displayName: string
     //   - photoURL: string
-    //   - role: string (customer/admin)
+    //   - role: string (customer/admin/restaurant)
     //
     // Collection: restaurants
     // Document ID: {restaurantId}
     // Fields:
+    //   - id: string (required)
     //   - name: string (required)
-    //   - image: string (required)
     //   - description: string
+    //   - image: string (required)
     //   - rating: number
+    //   - category: string (required)
+    //   - ownerEmail: string (required)
+    //   - pinnedOrder: number
     //
     // Collection: restaurants/{restaurantId}/menu
     // Document ID: {itemId}
     // Fields:
+    //   - id: string (required)
+    //   - restaurantId: string (required)
     //   - name: string (required)
+    //   - description: string
     //   - price: number (required)
     //   - image: string
+    //   - category: string
     //
     // Collection: orders
     // Document ID: {orderId}
     // Fields:
     //   - userId: string (required)
+    //   - userName: string
+    //   - userEmail: string
     //   - restaurantId: string (required)
+    //   - restaurantName: string
     //   - items: list (required)
     //   - totalAmount: number (required)
+    //   - commissionAmount: number (required)
+    //   - restaurantEarnings: number (required)
     //   - status: string (required)
+    //   - paymentStatus: string
+    //   - createdAt: timestamp
     //
     // ===============================================================
 
@@ -53,33 +68,38 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
     
-    function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.userId;
-    }
-    
     function isAdmin() {
       return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "sloudsan@gmail.com" && request.auth.token.email_verified == true) ||
-          (request.auth.token.email == "sansneat@sanscounts.com" && request.auth.token.email_verified == true));
+          ((request.auth.token.email == "sloudsan@gmail.com" || request.auth.token.email == "sansneat@sanscounts.com") && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email']) &&
-             data.uid is string &&
-             data.email is string &&
-             (!('role' in data) || data.role in ['customer', 'admin', 'restaurant']);
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid == request.auth.uid &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['customer', 'admin', 'restaurant'] &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 2000));
     }
 
     function isValidOrder(data) {
       return data.keys().hasAll(['userId', 'restaurantId', 'items', 'totalAmount', 'status', 'commissionAmount', 'restaurantEarnings']) &&
              data.userId is string &&
              data.restaurantId is string &&
-             data.items is list &&
-             data.totalAmount is number &&
-             data.commissionAmount is number &&
-             data.restaurantEarnings is number &&
-             data.status in ['pending', 'preparing', 'out-for-delivery', 'delivered'];
+             data.items is list && data.items.size() > 0 && data.items.size() < 50 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.commissionAmount is number && data.commissionAmount >= 0 &&
+             data.restaurantEarnings is number && data.restaurantEarnings >= 0 &&
+             data.status in ['pending', 'preparing', 'out-for-delivery', 'delivered'] &&
+             (!('userName' in data) || (data.userName is string && data.userName.size() < 100)) &&
+             (!('userEmail' in data) || isValidEmail(data.userEmail)) &&
+             (!('restaurantName' in data) || (data.restaurantName is string && data.restaurantName.size() < 100)) &&
+             (!('paymentStatus' in data) || data.paymentStatus in ['paid', 'unpaid']);
     }
 
     function isRestaurantOwner(restaurantId) {
@@ -88,16 +108,26 @@ service cloud.firestore {
     }
 
     function isValidRestaurant(data) {
-      return data.keys().hasAll(['name', 'image', 'category']) &&
+      return data.keys().hasAll(['id', 'name', 'image', 'category', 'ownerEmail']) &&
+             data.id is string &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.image is string &&
-             data.category is string;
+             data.image is string && data.image.size() < 1000000 && // Allow large base64 but limit it
+             data.category is string && data.category.size() < 50 &&
+             isValidEmail(data.ownerEmail) &&
+             (!('description' in data) || (data.description is string && data.description.size() < 500)) &&
+             (!('rating' in data) || (data.rating is number && data.rating >= 0 && data.rating <= 5)) &&
+             (!('pinnedOrder' in data) || (data.pinnedOrder is number));
     }
 
     function isValidMenuItem(data) {
-      return data.keys().hasAll(['name', 'price']) &&
+      return data.keys().hasAll(['id', 'restaurantId', 'name', 'price']) &&
+             data.id is string &&
+             data.restaurantId is string &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.price is number && data.price >= 0;
+             data.price is number && data.price >= 0 &&
+             (!('description' in data) || (data.description is string && data.description.size() < 500)) &&
+             (!('image' in data) || (data.image is string && data.image.size() < 1000000)) &&
+             (!('category' in data) || (data.category is string && data.category.size() < 50));
     }
 
     // ===============================================================
@@ -112,7 +142,7 @@ service cloud.firestore {
 
     match /restaurants/{restaurantId} {
       allow read: if true;
-      allow create: if isAdmin();
+      allow create: if isAdmin() && isValidRestaurant(request.resource.data);
       allow update: if isAdmin() || (isRestaurantOwner(restaurantId) && isValidRestaurant(request.resource.data));
       allow delete: if isAdmin();
       
@@ -125,7 +155,7 @@ service cloud.firestore {
     match /orders/{orderId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAdmin());
       allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId && isValidOrder(request.resource.data);
-      allow update: if isAuthenticated() && (isAdmin() || (isDocOwner() && request.resource.data.status == resource.data.status && isValidOrder(request.resource.data)));
+      allow update: if isAuthenticated() && (isAdmin() || (request.auth.uid == resource.data.userId && request.resource.data.status == resource.data.status && isValidOrder(request.resource.data)));
     }
   }
 }
