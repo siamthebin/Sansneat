@@ -193,7 +193,18 @@ const IntroSequence = ({ onComplete }: { onComplete: () => void }) => {
 
 export default function App() {
   const [showIntro, setShowIntro] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    const saved = localStorage.getItem('sansneat_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('sansneat_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('sansneat_user');
+    }
+  }, [user]);
   const [view, setView] = useState<AppView>('home');
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
@@ -225,59 +236,6 @@ export default function App() {
 
   // Admin Emails
   const ADMIN_EMAILS = ['sloudsan@gmail.com', 'sansneat@sanscounts.com'];
-
-  // Auth Listener
-  useEffect(() => {
-    console.log("App: Auth listener mounting");
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log("App: Auth state changed", firebaseUser?.email || "No user");
-      try {
-        if (firebaseUser) {
-          const userPath = `users/${firebaseUser.uid}`;
-          let userDoc;
-          try {
-            userDoc = await getDoc(doc(db, userPath));
-          } catch (error) {
-            handleFirestoreError(error, OperationType.GET, userPath);
-          }
-          if (userDoc && userDoc.exists()) {
-            const userData = userDoc.data() as UserProfile;
-            // Ensure admin email always has admin role
-            if (ADMIN_EMAILS.includes(userData.email) && userData.role !== 'admin') {
-              const updatedUser = { ...userData, role: 'admin' as const };
-              try {
-                await setDoc(doc(db, userPath), updatedUser);
-              } catch (error) {
-                handleFirestoreError(error, OperationType.WRITE, userPath);
-              }
-              setUser(updatedUser);
-            } else {
-              setUser(userData);
-            }
-          } else {
-            const newUser: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email!,
-              displayName: firebaseUser.displayName,
-              photoURL: firebaseUser.photoURL,
-              role: ADMIN_EMAILS.includes(firebaseUser.email!) ? 'admin' : 'customer'
-            };
-            try {
-              await setDoc(doc(db, userPath), newUser);
-            } catch (error) {
-              handleFirestoreError(error, OperationType.WRITE, userPath);
-            }
-            setUser(newUser);
-          }
-        } else {
-          setUser(null);
-        }
-      } catch (error) {
-        console.error("Auth listener error:", error);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
 
   // Real-time Restaurants Listener
   useEffect(() => {
