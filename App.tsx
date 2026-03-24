@@ -10,7 +10,7 @@ import {
   ArrowLeft, LogOut, LogIn, Sparkles, Menu as MenuIcon, X, Smartphone, Globe, Check, History, Settings, AlertCircle
 } from 'lucide-react';
 import { 
-  auth, db, signOut, onAuthStateChanged,
+  auth, db, signOut, onAuthStateChanged, signInWithCustomToken,
   collection, doc, setDoc, getDoc, getDocs, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc 
 } from './firebase';
 import { UserProfile, Restaurant, MenuItem, CartItem, Order, AppView, OperationType, FirestoreErrorInfo } from './types';
@@ -237,11 +237,40 @@ export default function App() {
   // Admin Emails
   const ADMIN_EMAILS = ['sloudsan@gmail.com', 'sansneat@sanscounts.com'];
 
+  // Sync Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      console.log("Firebase Auth state changed:", firebaseUser?.email);
+      if (firebaseUser) {
+        // If firebase user exists, ensure our user state is consistent
+        const email = firebaseUser.email || '';
+        const isAdmin = ADMIN_EMAILS.includes(email);
+        setUser(prev => {
+          if (prev && prev.uid === firebaseUser.uid) return prev;
+          return {
+            uid: firebaseUser.uid,
+            email: email,
+            displayName: firebaseUser.displayName || 'Sanscounts User',
+            photoURL: firebaseUser.photoURL || '',
+            role: isAdmin ? 'admin' : 'customer'
+          };
+        });
+      } else {
+        // If no firebase user, we might still have a local user from localStorage
+        // but they won't be able to perform authenticated actions.
+        // For now, we'll keep the local user if it exists, but ideally we'd sign out.
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Real-time Restaurants Listener
   useEffect(() => {
     const path = 'restaurants';
     const unsubscribe = onSnapshot(collection(db, path), (snapshot) => {
+      console.log("Restaurants snapshot received, count:", snapshot.docs.length);
       const restaurantList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Restaurant));
+      console.log("Restaurant list:", restaurantList);
       // Sort by pinnedOrder (pinned first, then by name)
       const sorted = restaurantList.sort((a, b) => {
         const pinA = a.pinnedOrder || 0;
@@ -426,8 +455,10 @@ export default function App() {
         rating: 5.0
       };
       const restaurantPath = `restaurants/${id}`;
+      console.log("Adding restaurant to path:", restaurantPath, restaurantData);
       try {
         await setDoc(doc(db, restaurantPath), restaurantData);
+        console.log("Restaurant added successfully to Firestore");
         
         // Update user role if they exist
         const usersPath = 'users';
@@ -1755,12 +1786,23 @@ export default function App() {
               </div>
               <div className="space-y-4">
                 <LoginWithSanscounts 
-                    onLoginSuccess={(userData) => {
-                      console.log("User logged in:", userData);
+                    onLoginSuccess={async (userData) => {
+                      console.log("User logged in with Sanscounts:", userData);
+                      
+                      if (userData.firebaseToken) {
+                        try {
+                          console.log("Signing in to Firebase with custom token...");
+                          await signInWithCustomToken(auth, userData.firebaseToken);
+                          console.log("Firebase Auth successful");
+                        } catch (e) {
+                          console.error("Firebase Auth failed:", e);
+                        }
+                      }
+
                       const email = userData.email || '';
                       const isAdmin = ADMIN_EMAILS.includes(email);
                       setUser({
-                        uid: userData.userId || userData.id || 'sanscounts-user',
+                        uid: auth.currentUser?.uid || userData.userId || userData.id || 'sanscounts-user',
                         email: email,
                         displayName: userData.name || 'Sanscounts User',
                         photoURL: userData.photoURL || userData.avatar || '',

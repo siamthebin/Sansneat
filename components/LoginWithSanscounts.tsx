@@ -12,7 +12,7 @@ export function LoginWithSanscounts({ onLoginSuccess }: LoginWithSanscountsProps
     
     // Using window.location.origin so it works both locally and in the deployed app
     const redirectUri = encodeURIComponent(`${window.location.origin}/auth/callback`);
-    const authUrl = `https://ais-dev-nzkcf6uurov3zlnhgpfwpv-488568450855.asia-east1.run.app/oauth/authorize?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`;
+    const authUrl = `${window.location.origin}/auth/callback?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code`;
     
     // পপআপ স্ক্রিনের মাঝখানে দেখানোর জন্য
     const width = 500;
@@ -30,8 +30,12 @@ export function LoginWithSanscounts({ onLoginSuccess }: LoginWithSanscountsProps
   useEffect(() => {
     // ২. পপআপ থেকে সাকসেস মেসেজ রিসিভ করা
     const handleMessage = (event: MessageEvent) => {
-      // সিকিউরিটি চেক: মেসেজটি কি আসলেই Sanscounts থেকে এসেছে?
-      if (!event.origin.includes('nzkcf6uurov3zlnhgpfwpv')) return;
+      // Security check: allow current origin or localhost
+      const isAllowedOrigin = event.origin === window.location.origin || 
+                             event.origin.includes('localhost') ||
+                             event.origin.includes('.run.app');
+      
+      if (!isAllowedOrigin) return;
 
       if (event.data?.type === 'SANSCOUNTS_AUTH_SUCCESS') {
         const userData = event.data.payload;

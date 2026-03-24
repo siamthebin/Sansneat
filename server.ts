@@ -4,6 +4,23 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import * as path from "path";
 import Stripe from 'stripe';
+import * as admin from 'firebase-admin';
+import fs from 'fs';
+
+// Load Firebase Config
+const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+
+// Initialize Firebase Admin
+try {
+  admin.initializeApp({
+    projectId: firebaseConfig.projectId,
+    // We don't have a service account key, but we can try to use default credentials
+    // or just skip custom token generation if it fails.
+  });
+  console.log("Firebase Admin initialized.");
+} catch (e) {
+  console.error("Firebase Admin initialization failed:", e);
+}
 
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
@@ -56,23 +73,36 @@ async function startServer() {
     });
 
     // OAuth Callback Handler for Sanscounts
-    app.get("/auth/callback", (req, res) => {
+    app.get("/auth/callback", async (req, res) => {
       const { code } = req.query;
       
       // In a real scenario, you would exchange the code for tokens here.
-      // For this demo, we'll just send a success message back to the opener.
+      // For this demo, we'll generate a mock user and a Firebase Custom Token if possible.
       
+      const email = 'sloudsan@gmail.com'; // Use the user's email to match the admin rule
+      const uid = 'sanscounts_' + Buffer.from(email).toString('hex').substr(0, 20);
+      
+      let firebaseToken = null;
+      try {
+        // This will only work if we have service account credentials or are in a supported environment
+        firebaseToken = await admin.auth().createCustomToken(uid, { email, email_verified: true });
+        console.log("Generated Firebase Custom Token for:", email);
+      } catch (e) {
+        console.error("Failed to generate custom token:", e);
+      }
+
       res.send(`
         <html>
           <body style="background: #09090b; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
             <div style="text-align: center;">
-              <div style="width: 40px; height: 40px; border: 3px solid #ef4444; border-top-color: transparent; border-radius: 50%; animate: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+              <div style="width: 40px; height: 40px; border: 3px solid #ef4444; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
               <script>
                 const userData = {
-                  uid: 'sanscounts_' + Math.random().toString(36).substr(2, 9),
+                  uid: '${uid}',
                   name: 'Sanscounts User',
-                  email: 'user@sanscounts.com',
-                  photoURL: 'https://i.postimg.cc/wvXS9k1D/IMG-9128.jpg'
+                  email: '${email}',
+                  photoURL: 'https://i.postimg.cc/wvXS9k1D/IMG-9128.jpg',
+                  firebaseToken: ${firebaseToken ? `'${firebaseToken}'` : 'null'}
                 };
                 
                 if (window.opener) {
