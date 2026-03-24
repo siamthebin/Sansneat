@@ -10,7 +10,7 @@ import {
   ArrowLeft, LogOut, LogIn, Sparkles, Menu as MenuIcon, X, Smartphone, Globe, Check, History, Settings, AlertCircle
 } from 'lucide-react';
 import { 
-  auth, db, signOut, onAuthStateChanged, signInWithCustomToken,
+  auth, db, signOut, onAuthStateChanged, signInWithCustomToken, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   collection, doc, setDoc, getDoc, getDocs, query, where, onSnapshot, addDoc, serverTimestamp, updateDoc 
 } from './firebase';
 import { UserProfile, Restaurant, MenuItem, CartItem, Order, AppView, OperationType, FirestoreErrorInfo } from './types';
@@ -1789,20 +1789,43 @@ export default function App() {
                     onLoginSuccess={async (userData) => {
                       console.log("User logged in with Sanscounts:", userData);
                       
-                      if (userData.firebaseToken) {
-                        try {
-                          console.log("Signing in to Firebase with custom token...");
-                          await signInWithCustomToken(auth, userData.firebaseToken);
-                          console.log("Firebase Auth successful");
-                        } catch (e) {
-                          console.error("Firebase Auth failed:", e);
+                      const email = userData.email || 'sansneat@sanscounts.com';
+                      const dummyPassword = 'Sanscounts123!@#';
+                      let finalUid = userData.uid || 'sanscounts-user';
+                      
+                      try {
+                        const userCredential = await signInWithEmailAndPassword(auth, email, dummyPassword);
+                        console.log("Firebase Auth successful via Email/Password");
+                        finalUid = userCredential.user.uid;
+                      } catch (error: any) {
+                        console.log("Sign in failed, trying to create user...", error.code);
+                        if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-login-credentials') {
+                          try {
+                            const userCredential = await createUserWithEmailAndPassword(auth, email, dummyPassword);
+                            console.log("Firebase User created and signed in");
+                            finalUid = userCredential.user.uid;
+                            
+                            // Create user doc
+                            await setDoc(doc(db, 'users', finalUid), {
+                              email: email,
+                              name: userData.name || 'Sanscounts Admin',
+                              role: 'admin',
+                              createdAt: serverTimestamp()
+                            });
+                          } catch (createError: any) {
+                            console.error("Failed to create user:", createError);
+                            if (createError.code === 'auth/operation-not-allowed') {
+                              alert("Please enable 'Email/Password' authentication in your Firebase Console to use this mock login.");
+                            }
+                          }
+                        } else if (error.code === 'auth/operation-not-allowed') {
+                          alert("Please enable 'Email/Password' authentication in your Firebase Console to use this mock login.");
                         }
                       }
 
-                      const email = userData.email || '';
                       const isAdmin = ADMIN_EMAILS.includes(email);
                       setUser({
-                        uid: auth.currentUser?.uid || userData.userId || userData.id || 'sanscounts-user',
+                        uid: auth.currentUser?.uid || finalUid,
                         email: email,
                         displayName: userData.name || 'Sanscounts User',
                         photoURL: userData.photoURL || userData.avatar || '',
