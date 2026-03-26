@@ -191,6 +191,8 @@ const IntroSequence = ({ onComplete }: { onComplete: () => void }) => {
 
 // --- Main App Component ---
 
+import { SavedPaymentMethods } from './components/SavedPaymentMethods';
+
 export default function App() {
   const [showIntro, setShowIntro] = useState(true);
   const [user, setUser] = useState<UserProfile | null>(() => {
@@ -239,26 +241,39 @@ export default function App() {
 
   // Sync Firebase Auth state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log("Firebase Auth state changed:", firebaseUser?.email);
       if (firebaseUser) {
-        // If firebase user exists, ensure our user state is consistent
         const email = firebaseUser.email || '';
         const isAdmin = ADMIN_EMAILS.includes(email);
+        
+        let stripeCustomerId = undefined;
+        let role: 'customer' | 'admin' | 'restaurant' = isAdmin ? 'admin' : 'customer';
+        
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            if (data.stripeCustomerId) stripeCustomerId = data.stripeCustomerId;
+            if (data.role) role = data.role;
+          }
+        } catch (e) {
+          console.error("Error fetching user doc:", e);
+        }
+
         setUser(prev => {
-          if (prev && prev.uid === firebaseUser.uid) return prev;
+          if (prev && prev.uid === firebaseUser.uid && prev.stripeCustomerId === stripeCustomerId && prev.role === role) return prev;
           return {
             uid: firebaseUser.uid,
             email: email,
             displayName: firebaseUser.displayName || 'Sanscounts User',
             photoURL: firebaseUser.photoURL || '',
-            role: isAdmin ? 'admin' : 'customer'
+            role: role,
+            stripeCustomerId: stripeCustomerId
           };
         });
       } else {
-        // If no firebase user, we might still have a local user from localStorage
-        // but they won't be able to perform authenticated actions.
-        // For now, we'll keep the local user if it exists, but ideally we'd sign out.
+        setUser(null);
       }
     });
     return () => unsubscribe();
@@ -342,6 +357,7 @@ export default function App() {
 
   const handleLogout = async () => {
     await signOut(auth);
+    setUser(null);
     setView('home');
   };
 
@@ -374,8 +390,8 @@ export default function App() {
     setLoading(true);
     try {
       const total = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-      const commission = total * 0.10; // 10% commission
-      const earnings = total - commission; // 90% to restaurant
+      const commission = total * 0.07; // 7% commission
+      const earnings = total - commission; // 93% to restaurant
 
       const newOrder = {
         userId: user.uid,
@@ -1322,6 +1338,8 @@ export default function App() {
               )}
             </div>
 
+            <SavedPaymentMethods customerId={user.stripeCustomerId} />
+
             {/* Restaurant Owner Dashboard */}
             {user.role === 'restaurant' && (
               <div className="space-y-8">
@@ -1869,8 +1887,22 @@ export default function App() {
                   <Elements stripe={stripePromise}>
                     <StripePaymentForm 
                       amount={cart.reduce((a, b) => a + b.price * b.quantity, 0)}
+                      customerId={user?.stripeCustomerId}
+                      email={user?.email}
+                      name={user?.displayName || undefined}
                       onProcessing={() => setPaymentStep('processing')}
-                      onSuccess={() => {
+                      onSuccess={async (newCustomerId) => {
+                        if (newCustomerId && user && newCustomerId !== user.stripeCustomerId) {
+                          try {
+                            const userPath = `users/${user.uid}`;
+                            await updateDoc(doc(db, userPath), {
+                              stripeCustomerId: newCustomerId
+                            });
+                            setUser(prev => prev ? { ...prev, stripeCustomerId: newCustomerId } : null);
+                          } catch (e) {
+                            console.error("Failed to save Stripe Customer ID", e);
+                          }
+                        }
                         setPaymentStep('success');
                         setTimeout(placeOrder, 2000);
                       }}

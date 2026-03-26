@@ -9,7 +9,8 @@
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
-        "role": { "type": "string", "enum": ["customer", "admin", "restaurant"] }
+        "role": { "type": "string", "enum": ["customer", "admin", "restaurant"] },
+        "stripeCustomerId": { "type": "string" }
       },
       "required": ["uid", "email", "role"]
     },

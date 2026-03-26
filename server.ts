@@ -41,29 +41,118 @@ async function startServer() {
     // API Route for Stripe Payment Intent
     app.post("/api/create-payment-intent", async (req, res) => {
       try {
-        const { amount, currency = 'usd' } = req.body;
+        const { amount, currency = 'usd', customerId, saveCard, email, name, paymentMethodId } = req.body;
 
         if (!process.env.STRIPE_SECRET_KEY) {
           return res.status(500).json({ error: "Stripe Secret Key not configured" });
         }
 
-        // Lazy initialize Stripe
-        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-        // Create a PaymentIntent with the order amount and currency
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(amount * 100), // Stripe expects amount in cents
-          currency: currency,
-          automatic_payment_methods: {
-            enabled: true,
-          },
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+          apiVersion: '2025-02-24.acacia' as any,
         });
+
+        const params: any = {
+          amount: Math.round(amount * 100),
+          currency: currency,
+          payment_method_types: ['card'],
+        };
+
+        let targetCustomerId = customerId;
+
+        if (saveCard && !paymentMethodId) {
+          if (!targetCustomerId) {
+            const customer = await stripe.customers.create({ email, name });
+            targetCustomerId = customer.id;
+          }
+          params.setup_future_usage = 'off_session';
+        }
+
+        if (targetCustomerId) {
+          params.customer = targetCustomerId;
+        }
+
+        if (paymentMethodId) {
+          params.payment_method = paymentMethodId;
+          params.confirm = true;
+          params.return_url = req.headers.origin ? `${req.headers.origin}/` : 'http://localhost:3000/';
+        }
+
+        const paymentIntent = await stripe.paymentIntents.create(params);
 
         res.json({
           clientSecret: paymentIntent.client_secret,
+          customerId: targetCustomerId,
+          status: paymentIntent.status,
+          requiresAction: paymentIntent.status === 'requires_action'
         });
       } catch (error: any) {
         console.error("Stripe Error:", error.message);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // API Route for Stripe Setup Intent (Saving a card)
+    app.post("/api/create-setup-intent", async (req, res) => {
+      try {
+        const { email, name, customerId } = req.body;
+
+        if (!process.env.STRIPE_SECRET_KEY) {
+          return res.status(500).json({ error: "Stripe Secret Key not configured" });
+        }
+
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+          apiVersion: '2025-02-24.acacia' as any,
+        });
+
+        let targetCustomerId = customerId;
+
+        if (!targetCustomerId) {
+          const customer = await stripe.customers.create({ email, name });
+          targetCustomerId = customer.id;
+        }
+
+        const setupIntent = await stripe.setupIntents.create({
+          customer: targetCustomerId,
+          payment_method_types: ['card'],
+        });
+
+        res.json({
+          clientSecret: setupIntent.client_secret,
+          customerId: targetCustomerId,
+        });
+      } catch (error: any) {
+        console.error("Stripe Setup Error:", error.message);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // API Route to get saved payment methods
+    app.post("/api/get-payment-methods", async (req, res) => {
+      try {
+        const { customerId } = req.body;
+
+        if (!process.env.STRIPE_SECRET_KEY) {
+          return res.status(500).json({ error: "Stripe Secret Key not configured" });
+        }
+
+        if (!customerId) {
+          return res.json({ paymentMethods: [] });
+        }
+
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+          apiVersion: '2025-02-24.acacia' as any,
+        });
+
+        const paymentMethods = await stripe.paymentMethods.list({
+          customer: customerId,
+          type: 'card',
+        });
+
+        res.json({
+          paymentMethods: paymentMethods.data,
+        });
+      } catch (error: any) {
+        console.error("Stripe Get Methods Error:", error.message);
         res.status(500).json({ error: error.message });
       }
     });

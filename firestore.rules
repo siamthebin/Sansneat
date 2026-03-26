@@ -69,8 +69,9 @@ service cloud.firestore {
     }
     
     function isAdmin() {
-      // TEMPORARY: Allow all access since Email/Password auth is not enabled
-      return true;
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "sloudsan@gmail.com" && request.auth.token.email_verified == true));
     }
 
     function isValidEmail(email) {
@@ -83,7 +84,8 @@ service cloud.firestore {
              data.email is string && isValidEmail(data.email) &&
              data.role in ['customer', 'admin', 'restaurant'] &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
-             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 2000));
+             (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 2000)) &&
+             (!('stripeCustomerId' in data) || (data.stripeCustomerId is string && data.stripeCustomerId.size() < 100));
     }
 
     function isValidOrder(data) {
@@ -135,8 +137,8 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isAdmin() || isOwner(userId);
-      allow create: if true; // TEMPORARY: Allow all access since Email/Password auth is not enabled
-      allow update: if true; // TEMPORARY: Allow all access since Email/Password auth is not enabled
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == 'customer') || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
     }
 
     match /restaurants/{restaurantId} {
@@ -153,7 +155,7 @@ service cloud.firestore {
 
     match /orders/{orderId} {
       allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.userId);
-      allow create: if true; // TEMPORARY: Allow all access since Email/Password auth is not enabled
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.userId && isValidOrder(request.resource.data);
       allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.userId && request.resource.data.status == resource.data.status && isValidOrder(request.resource.data));
     }
   }

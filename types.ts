@@ -9,6 +9,7 @@ export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
   role: 'customer' | 'admin' | 'restaurant';
+  stripeCustomerId?: string;
 }
 
 export interface Restaurant {
