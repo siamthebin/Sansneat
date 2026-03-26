@@ -446,6 +446,10 @@ export default function App() {
       alert("Please provide an owner email");
       return;
     }
+    if (newRestaurant.image && newRestaurant.image.length > 1000000) {
+      alert("Image is too large. Please upload an image smaller than 1MB.");
+      return;
+    }
     setLoading(true);
     try {
       const id = 'r' + Date.now();
@@ -461,15 +465,19 @@ export default function App() {
         console.log("Restaurant added successfully to Firestore");
         
         // Update user role if they exist
-        const usersPath = 'users';
-        const q = query(collection(db, usersPath), where('email', '==', newRestaurant.ownerEmail));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          const userDoc = querySnapshot.docs[0];
-          const userDocPath = `users/${userDoc.id}`;
-          await updateDoc(doc(db, userDocPath), {
-            role: 'restaurant'
-          });
+        try {
+          const usersPath = 'users';
+          const q = query(collection(db, usersPath), where('email', '==', newRestaurant.ownerEmail));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            const userDoc = querySnapshot.docs[0];
+            const userDocPath = `users/${userDoc.id}`;
+            await updateDoc(doc(db, userDocPath), {
+              role: 'restaurant'
+            });
+          }
+        } catch (roleError) {
+          console.warn("Could not update user role (this is expected if not fully authenticated):", roleError);
         }
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, restaurantPath);
