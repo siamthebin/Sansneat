@@ -1823,6 +1823,21 @@ export default function App() {
                         const userCredential = await signInWithEmailAndPassword(auth, email, dummyPassword);
                         console.log("Firebase Auth successful via Email/Password");
                         finalUid = userCredential.user.uid;
+                        
+                        // Check if user doc exists, if not create it
+                        const userDocRef = doc(db, 'users', finalUid);
+                        const userDocSnap = await getDoc(userDocRef);
+                        
+                        if (!userDocSnap.exists()) {
+                           await setDoc(userDocRef, {
+                             uid: finalUid,
+                             email: email,
+                             displayName: userData.name || 'Sanscounts User',
+                             photoURL: userData.photoURL || userData.avatar || '',
+                             role: ADMIN_EMAILS.includes(email) ? 'admin' : 'customer',
+                             createdAt: serverTimestamp()
+                           });
+                        }
                       } catch (error: any) {
                         console.log("Sign in failed, trying to create user...", error.code);
                         if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential' || error.code === 'auth/invalid-login-credentials') {
@@ -1833,9 +1848,11 @@ export default function App() {
                             
                             // Create user doc
                             await setDoc(doc(db, 'users', finalUid), {
+                              uid: finalUid,
                               email: email,
-                              name: userData.name || 'Sanscounts Admin',
-                              role: 'admin',
+                              displayName: userData.name || 'Sanscounts User',
+                              photoURL: userData.photoURL || userData.avatar || '',
+                              role: ADMIN_EMAILS.includes(email) ? 'admin' : 'customer',
                               createdAt: serverTimestamp()
                             });
                           } catch (createError: any) {
